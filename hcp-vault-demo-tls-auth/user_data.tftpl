@@ -1,0 +1,121 @@
+
+#!/bin/bash
+# Set up Vault Agent
+echo Installing Vault Agent
+sleep 30
+sudo yum install -y yum-utils
+sudo yum-config-manager --add-repo https://rpm.releases.hashicorp.com/AmazonLinux/hashicorp.repo
+sudo yum install -y vault-1.18.5-1 jq
+
+sudo mkdir /home/vault
+sudo chown vault:vault /home/vault
+
+export VAULT_NAMESPACE="admin"
+export VAULT_ADDR=${vault_address}
+export VAULT_TOKEN=${vault_token}
+
+# Build Vault Agent Config
+sudo cat <<EOF > /home/vault/agent-config.hcl
+pid_file = "./pidfile"
+
+log_file = "/home/vault/vault-agent.log"
+
+vault {
+  address = "${vault_address}"
+  retry {
+    num_retries = 5
+  }
+  namespace = "admin"
+}
+
+auto_auth {
+  enable_reauth_on_new_credentials = true
+
+  method {
+    type = "cert"
+    mount_path = "auth/service_cert"
+    config = {
+        name = "service_auth"
+        client_cert = "/home/vault/cert.pem"
+        client_key = "/home/vault/key.pem"
+        reload = true
+    }    
+  }
+
+  sink "file" {
+    config = {
+      path = "/tmp/token"
+    }
+  }
+}
+
+cache {
+  // An empty cache stanza still enables caching
+}
+
+template_config {
+  static_secret_render_interval = "1m"
+  exit_on_retry_failure = true
+  max_connections_per_host = 20
+}
+
+template {
+    source = "/home/vault/secrets.tmpl"
+    destination = "/tmp/agent/secrets.txt"
+}
+
+template {
+    source = "/home/vault/certs.tmpl"
+    destination = "/tmp/agent/certs.txt"    
+}
+EOF
+
+# Write template file to render KV secrets
+sudo cat <<EOF > /home/vault/secrets.tmpl
+{{ with secret "secrets/data/service-a.service.vault.lab/secret" }}
+Username: {{ .Data.data.username }}
+Password: {{ .Data.data.password }}
+{{ end }}
+EOF
+
+# Write template file to render certificates back into auth method
+sudo cat <<EOF > /home/vault/certs.tmpl
+{{ with pkiCert "pki_int/issue/service_role" "common_name=service-a.service.vault.lab" "ttl=2m" }}
+{{ .Cert }}{{ .Key }}
+{{ .Cert | writeToFile "/home/vault/cert.pem" "vault" "vault" "0644" }}
+{{ .Key | writeToFile "/home/vault/key.pem" "vault" "vault" "0600" }}
+{{ end }}
+EOF
+
+# Create initial cert for auto auth, and set appropriate permissions on vault home folder
+vault write -namespace=admin -format=json -f pki_int/issue/service_role common_name=service-a.service.vault.lab ttl=5m > /tmp/cert.json
+jq -r '.data.certificate' /tmp/cert.json > /home/vault/cert.pem
+jq -r '.data.private_key' /tmp/cert.json > /home/vault/key.pem
+chown -R vault:vault /home/vault
+
+sudo cat <<EOF > /lib/systemd/system/vault-agent.service
+[Unit]
+Description="HashiCorp Vault"
+Documentation="https://developer.hashicorp.com/vault/docs"
+ConditionFileNotEmpty=/home/vault/agent-config.hcl
+
+[Service]
+User=vault
+Group=vault
+WorkingDirectory=/home/vault
+SecureBits=keep-caps
+AmbientCapabilities=CAP_IPC_LOCK
+CapabilityBoundingSet=CAP_SYSLOG CAP_IPC_LOCK
+NoNewPrivileges=yes
+ExecStart=/usr/bin/vault agent -log-level=debug -config=/home/vault/agent-config.hcl
+ExecReload=/bin/kill --signal HUP
+KillMode=process
+KillSignal=SIGINT
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo chmod 644 /lib/systemd/system/vault-agent.service
+sudo systemctl daemon-reload
+sudo systemctl start vault-agent.service
