@@ -26,9 +26,9 @@ resource "vault_aws_auth_backend_role" "role" {
   role                     = "vault-role-for-aws-ec2role"
   auth_type                = "iam"
   bound_iam_principal_arns = [aws_iam_role.vault_target_iam_role.arn]
-  token_ttl                = 60
-  token_max_ttl            = 120
-  token_policies           = [vault_policy.kv_policy.name]
+  token_ttl                = 600
+  token_max_ttl            = 1200
+  token_policies           = [vault_policy.kv_policy.name, vault_policy.aws_read.name]
 }
 
 # Create Secret engine and secret that can be accessed via AWS auth role
@@ -69,6 +69,16 @@ path "secrets/*" {
 EOT
 }
 
+resource "vault_policy" "aws_read" {
+  name = "aws_read"
+
+  policy = <<EOT
+path "auth/aws/*" {
+  capabilities = ["read", "list"]
+}
+EOT
+}
+
 # Create AWS Secrets Engine
 
 resource "vault_aws_secret_backend" "vault_aws" {
@@ -76,6 +86,8 @@ resource "vault_aws_secret_backend" "vault_aws" {
   secret_key        = aws_iam_access_key.vault_mount_user.secret
   description       = "Demo of the AWS secrets engine"
   region            = data.aws_region.current.name
+  default_lease_ttl_seconds = 300
+  max_lease_ttl_seconds = 600
   username_template = "{{ if (eq .Type \"STS\") }}{{ printf \"${aws_iam_user.vault_mount_user.name}-%s-%s\" (random 20) (unix_time) | truncate 32 }}{{ else }}{{ printf \"${aws_iam_user.vault_mount_user.name}-vault-%s-%s\" (unix_time) (random 20) | truncate 60 }}{{ end }}"
 }
 
