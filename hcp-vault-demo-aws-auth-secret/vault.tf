@@ -86,8 +86,8 @@ resource "vault_aws_secret_backend" "vault_aws" {
   secret_key        = aws_iam_access_key.vault_mount_user.secret
   description       = "Demo of the AWS secrets engine"
   region            = data.aws_region.current.name
-  default_lease_ttl_seconds = 300
-  max_lease_ttl_seconds = 600
+  default_lease_ttl_seconds = 900
+  max_lease_ttl_seconds = 1500
   username_template = "{{ if (eq .Type \"STS\") }}{{ printf \"${aws_iam_user.vault_mount_user.name}-%s-%s\" (random 20) (unix_time) | truncate 32 }}{{ else }}{{ printf \"${aws_iam_user.vault_mount_user.name}-vault-%s-%s\" (unix_time) (random 20) | truncate 60 }}{{ end }}"
 }
 
