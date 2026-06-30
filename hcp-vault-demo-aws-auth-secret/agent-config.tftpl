@@ -1,0 +1,60 @@
+#!/bin/sh
+
+sudo yum install -y yum-utils shadow-utils
+sudo yum-config-manager --add-repo https://rpm.releases.hashicorp.com/AmazonLinux/hashicorp.repo
+sudo yum install -y vault
+
+cat <<EOF > /home/ec2-user/agent-config.hcl
+
+pid_file = "./pidfile"
+
+vault {
+   address = "${vault_address}"
+   tls_skip_verify = true
+   namespace = "admin"
+}
+
+auto_auth {
+  method "aws" {
+      mount_path = "auth/aws"
+      config = {
+          type = "iam"
+          role = "vault-role-for-aws-ec2role"
+      }
+  }
+
+  sink "file" {
+      config = {
+          path = "/home/ec2-user/vault-token-via-agent"
+      }
+  }
+}
+
+template_config {
+  static_secret_render_interval = "10m"
+  exit_on_retry_failure = true
+  max_connections_per_host = 20
+}
+
+template {
+  source      = "/home/ec2-user/config.tmpl"
+  destination = "/home/ec2-user/config.yml"
+  perms       = "0640"
+}
+EOF
+
+cat <<EOF > /home/ec2-user/config.tmpl
+host: postgres.hashicorp.com
+{{ with secret "secrets/secret" }}
+username: "{{ .Data.data.username }}"
+password: "{{ .Data.data.password }}"
+{{ end }}
+EOF
+
+chown ec2-user:ec2-user /home/ec2-user/agent-config.hcl
+chown ec2-user:ec2-user /home/ec2-user/config.tmpl
+
+chown 640 /home/ec2-user/agent-config.hcl
+chown 640 /home/ec2-user/config.tmlp
+
+

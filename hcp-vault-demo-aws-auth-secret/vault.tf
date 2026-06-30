@@ -8,6 +8,7 @@ resource "vault_aws_auth_backend_client" "client" {
   backend    = vault_auth_backend.aws.path
   access_key = aws_iam_access_key.vault_mount_user.id
   secret_key = aws_iam_access_key.vault_mount_user.secret
+  use_sts_region_from_client = true
 }
 
 resource "vault_aws_auth_backend_config_identity" "identity_config" {
@@ -39,17 +40,24 @@ resource "vault_mount" "kv" {
   options = { version = "2" }
 }
 
+ephemeral "random_password" "password" {
+  length           = 16
+  special          = true
+  override_special = "!#$%&*()-_=+[]{}<>:?"
+}
+
 resource "vault_kv_secret_v2" "example" {
   mount                      = vault_mount.kv.path
   name                       = "secret"
   cas                        = 1
   delete_all_versions        = true
-  data_json                  = jsonencode(
+  data_json_wo                  = jsonencode(
   {
-    zip       = "zap",
-    foo       = "bar"
+    username  = "admin",
+    password  = ephemeral.random_password.password.result
   }
   )
+
   custom_metadata {
     max_versions = 5
     data = {

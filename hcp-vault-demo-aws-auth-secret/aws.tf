@@ -2,6 +2,7 @@ locals {
   my_email = split("/", data.aws_caller_identity.current.arn)[2]
 }
 
+
 resource "aws_key_pair" "ec2_key" {
   key_name   = "ec2-key"
   public_key = var.public_key
@@ -25,7 +26,7 @@ resource "aws_iam_instance_profile" "instance_profile" {
 
 resource "aws_security_group" "security_group" {
   name = "allow-all-sg"
-
+  vpc_id = data.tfe_outputs.hcp_vault_demo_init.values.vpc_id
   egress {
     from_port   = 0
     to_port     = 0
@@ -46,11 +47,16 @@ resource "aws_instance" "my_instance" {
   instance_type               = "t2.micro"
   associate_public_ip_address = true
   iam_instance_profile        = aws_iam_instance_profile.instance_profile.name
+  subnet_id                   = data.tfe_outputs.hcp_vault_demo_init.values.public_subnets[1]
   vpc_security_group_ids      = [aws_security_group.security_group.id]
   key_name = aws_key_pair.ec2_key.key_name
   tags = {
     Name = "hcp-vault-demo-aws-auth-secret"
   }
+
+  user_data = templatefile("./agent-config.tftpl", {
+    vault_address        = data.tfe_outputs.hcp_vault_demo_init.values.vault_priv_url
+  })
 }
 
 #AWS Auth Method resources
